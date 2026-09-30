@@ -14,7 +14,7 @@ using Drawing = System.Drawing;
 
 [assembly: AssemblyTitle("TaskBar+")]
 [assembly: AssemblyDescription("Local taskbar transparency and centering for Windows 10")]
-[assembly: AssemblyVersion("1.0.2.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
 
 namespace TaskbarPlus
 {
@@ -25,16 +25,27 @@ namespace TaskbarPlus
         Application app;
         Window window;
         Forms.NotifyIcon tray;
+        ResourceUsage usage;
+        Forms.ToolStripMenuItem cpuItem, memoryItem;
         DispatcherTimer timer, saveTimer;
         EventWaitHandle showEvent, stopEvent;
         RegisteredWaitHandle showWait, stopWait;
         bool updating, exiting;
         string lastError;
+        string updateStatus = "Updates come from the public TaskBar+ GitHub releases.";
+        bool updateBusy;
+        ReleaseInfo availableUpdate;
         const string InstanceName = @"Local\TaskBarPlus.Desktop.v1";
 
         [STAThread]
         static int Main(string[] args)
         {
+            if (args.Contains("--apply-update")) return AppUpdater.Install();
+            if (args.Contains("--test-updater"))
+            {
+                try { return UpdaterTests.Run(); }
+                catch (Exception ex) { Directory.CreateDirectory(Settings.Folder); File.WriteAllText(Path.Combine(Settings.Folder, "updater-test-results.txt"), ex.ToString()); return 1; }
+            }
             if (args.Contains("--diagnose")) { Directory.CreateDirectory(Settings.Folder); File.WriteAllText(Path.Combine(Settings.Folder, "diagnostic.txt"), Native.Diagnose()); return 0; }
             if (args.Contains("--self-test")) return SelfTest.Run();
             if (args.Contains("--integration-test"))
@@ -54,14 +65,14 @@ namespace TaskbarPlus
             {
                 if (!created) { if (!args.Contains("--background")) Signal(InstanceName + ".Show"); return 0; }
                 var program = new Program();
-                try { program.Run(args.Contains("--background")); return 0; }
+                try { program.Run(args.Contains("--background"), args.Length == 2 && args[0] == "--updated" ? args[1] : null); return 0; }
                 catch (Exception ex) { Settings.Log(ex); if (!args.Contains("--background")) MessageBox.Show("TaskBar+ could not start. " + ex.Message, "TaskBar+"); return 1; }
                 finally { program.Cleanup(); mutex.ReleaseMutex(); }
             }
         }
         static void Signal(string name) { try { using (var signal = EventWaitHandle.OpenExisting(name)) signal.Set(); } catch (WaitHandleCannotBeOpenedException) { } }
 
-        void Run(bool background)
+        void Run(bool background, string updatedToken)
         {
             int build;
             using (var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion")) int.TryParse(Convert.ToString(key.GetValue("CurrentBuildNumber")), out build);
@@ -75,12 +86,18 @@ namespace TaskbarPlus
             showWait = ThreadPool.RegisterWaitForSingleObject(showEvent, delegate { app.Dispatcher.BeginInvoke(new Action(Show)); }, null, -1, false);
             stopWait = ThreadPool.RegisterWaitForSingleObject(stopEvent, delegate { app.Dispatcher.BeginInvoke(new Action(Quit)); }, null, -1, true);
             CreateTray();
-            timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(750) };
-            timer.Tick += delegate { Apply(); };
+            usage = new ResourceUsage();
+            UpdateUsage();
+            timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            timer.Tick += delegate { Apply(); if (usage.Sample()) UpdateUsage(); };
             saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
             saveTimer.Tick += delegate { saveTimer.Stop(); Save(); };
             Apply(); timer.Start();
             if (!background) Show();
+            if (updatedToken != null) AppUpdater.SignalReady(updatedToken);
+            var cleanupTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+            cleanupTimer.Tick += delegate { cleanupTimer.Stop(); System.Threading.Tasks.Task.Run(new Action(AppUpdater.CleanupStaging)); };
+            cleanupTimer.Start();
             app.Run();
         }
         void CreateTray()
@@ -89,6 +106,16 @@ namespace TaskbarPlus
             var menu = new Forms.ContextMenuStrip();
             menu.Items.Add("Open TaskBar+", null, delegate { Show(); });
             menu.Items.Add("Pause / resume", null, delegate { TogglePause(); });
+            var resourceMenu = new Forms.ToolStripMenuItem("Resource usage");
+            cpuItem = new Forms.ToolStripMenuItem("CPU: measuring...") { Enabled = false };
+            memoryItem = new Forms.ToolStripMenuItem("RAM: measuring...") { Enabled = false };
+            resourceMenu.DropDownItems.Add(cpuItem);
+            resourceMenu.DropDownItems.Add(memoryItem);
+            resourceMenu.DropDownItems.Add(new Forms.ToolStripMenuItem("Updates every 5 seconds") { Enabled = false });
+            resourceMenu.DropDownItems.Add("Open Task Manager", null, delegate { System.Diagnostics.Process.Start("taskmgr.exe"); });
+            menu.Items.Add(resourceMenu);
+            menu.Items.Add("Updates...", null, delegate { Show(); });
+            menu.Opening += delegate { if (usage != null && usage.Sample()) UpdateUsage(); };
             menu.Items.Add(new Forms.ToolStripSeparator());
             foreach (string effect in new[] { "Clear", "Blur", "Acrylic", "Opaque", "Default" })
             {
@@ -118,7 +145,9 @@ namespace TaskbarPlus
                     window.Icon = BitmapFrame.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
                     window.Icon.Freeze();
                 }
-                window.Closing += delegate(object sender, System.ComponentModel.CancelEventArgs e) { if (!exiting) { e.Cancel = true; window.Hide(); } };
+                // ShutdownMode is explicit: closing releases the window and controls,
+                // while the tray/engine continue. Recreate the UI only when requested.
+                window.Closed += delegate { window = null; app.MainWindow = null; };
                 foreach (string mode in new[] { "Clear", "Blur", "Acrylic", "Opaque", "Default" })
                 {
                     string selected = mode;
@@ -132,7 +161,8 @@ namespace TaskbarPlus
                 BindToggle("SecondsToggle", delegate(bool value) { WindowsPreferences.Seconds = value; });
                 Control<Button>("PauseButton").Click += delegate { TogglePause(); };
                 Control<Button>("ResetButton").Click += delegate { settings = new Settings { Effect = "Default", Center = false }; Changed(); Refresh(); };
-                Control<Button>("HideButton").Click += delegate { window.Hide(); };
+                Control<Button>("HideButton").Click += delegate { window.Close(); };
+                Control<Button>("UpdateButton").Click += delegate { CheckForUpdate(); };
                 Control<Button>("ColorButton").Click += delegate
                 {
                     using (var picker = new Forms.ColorDialog { FullOpen = true, Color = Drawing.ColorTranslator.FromHtml(settings.Color) })
@@ -145,7 +175,49 @@ namespace TaskbarPlus
                 Theme("ThemeMidnight", "Acrylic", "#131C2F", 65);
                 Theme("ThemeSage", "Blur", "#397D6C", 40);
             }
-            Refresh(); window.Show(); window.WindowState = WindowState.Normal; window.Activate();
+            Refresh(); UpdateUsage(); RefreshUpdateUi(); window.Show(); window.WindowState = WindowState.Normal; window.Activate();
+        }
+        async void CheckForUpdate()
+        {
+            if (updateBusy) return;
+            updateBusy = true;
+            bool installing = availableUpdate != null;
+            updateStatus = installing ? "Downloading and verifying the update..." : "Checking GitHub for the latest stable version...";
+            RefreshUpdateUi();
+            try
+            {
+                if (!installing)
+                {
+                    var release = await AppUpdater.CheckAsync();
+                    if (release.Version > AppUpdater.CurrentVersion)
+                    {
+                        availableUpdate = release;
+                        updateStatus = release.Tag + " is available. Installing keeps your settings and restarts the app.";
+                    }
+                    else updateStatus = "You're up to date · v" + AppUpdater.CurrentLabel;
+                }
+                else
+                {
+                    string folder = await AppUpdater.PrepareAsync(availableUpdate);
+                    settings.Save();
+                    AppUpdater.LaunchInstaller(folder);
+                    Quit();
+                }
+            }
+            catch (Exception ex)
+            {
+                Settings.Log(ex);
+                updateStatus = "Update " + (installing ? "installation" : "check") + " failed: " + ex.Message;
+            }
+            finally { updateBusy = false; if (!exiting) RefreshUpdateUi(); }
+        }
+        void RefreshUpdateUi()
+        {
+            if (window == null) return;
+            Control<TextBlock>("UpdateStatus").Text = updateStatus;
+            Control<TextBlock>("AppVersion").Text = "TaskBar+ v" + AppUpdater.CurrentLabel;
+            Control<Button>("UpdateButton").IsEnabled = !updateBusy;
+            Control<Button>("UpdateButton").Content = updateBusy ? "Please wait..." : availableUpdate != null ? "Install " + availableUpdate.Tag : "Check for updates";
         }
         sealed class WindowOwner : Forms.IWin32Window
         {
@@ -171,9 +243,27 @@ namespace TaskbarPlus
         void Save() { try { settings.Save(); } catch (Exception ex) { Settings.Log(ex); lastError = "Could not save preferences: " + ex.Message; } }
         void Apply()
         {
+            if (timer != null) timer.Interval = TimeSpan.FromSeconds(settings.Paused ? 5 : 1);
             try { engine.Apply(settings); }
             catch (Exception ex) { if (lastError != ex.Message) Settings.Log(ex); lastError = ex.Message; }
-            if (window != null) Control<TextBlock>("Status").Text = lastError ?? engine.Status;
+            if (window != null)
+            {
+                var status = Control<TextBlock>("Status");
+                string text = lastError ?? engine.Status;
+                if (status.Text != text) status.Text = text;
+            }
+        }
+        void UpdateUsage()
+        {
+            if (usage == null) return;
+            tray.Text = usage.TrayText;
+            cpuItem.Text = "CPU: " + usage.CpuText + " of system capacity";
+            memoryItem.Text = "RAM: " + usage.MemoryText + " (working set)";
+            if (window != null)
+            {
+                Control<TextBlock>("ResourceUsage").Text = usage.Summary + "   ·   PID " + usage.ProcessId;
+                Control<TextBlock>("ResourceUsage").ToolTip = "TaskBar+ process usage, sampled every 5 seconds. RAM is the working set. Windows rendering costs in Explorer/DWM are separate.";
+            }
         }
         void Refresh()
         {
@@ -225,6 +315,7 @@ namespace TaskbarPlus
             if (showEvent != null) { showEvent.Dispose(); showEvent = null; }
             if (stopEvent != null) { stopEvent.Dispose(); stopEvent = null; }
             engine.Dispose();
+            if (usage != null) { usage.Dispose(); usage = null; }
             if (tray != null) { tray.Visible = false; var icon = tray.Icon; tray.Dispose(); icon.Dispose(); tray = null; }
         }
     }

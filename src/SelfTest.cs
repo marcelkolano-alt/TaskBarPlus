@@ -108,6 +108,8 @@ namespace TaskbarPlus
             var results = new StringBuilder();
             int failures = 0;
             Action<string, bool> check = delegate(string name, bool ok) { results.AppendLine((ok ? "PASS " : "FAIL ") + name); if (!ok) failures++; };
+            check("One fully busy core on four processors reports 25% CPU", Math.Abs(ResourceUsage.CalculatePercent(5000, 5000, 4) - 25) < 0.001);
+            check("An empty CPU sampling interval does not divide by zero", ResourceUsage.CalculatePercent(0, 0, 4) == 0);
             using (var iconStream = Assembly.GetExecutingAssembly().GetManifestResourceStream("TaskbarPlus.Icon"))
             {
                 var decoder = BitmapDecoder.Create(iconStream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);

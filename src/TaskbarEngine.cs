@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Diagnostics;
 
 namespace TaskbarPlus
 {
@@ -9,6 +10,10 @@ namespace TaskbarPlus
         sealed class OriginalPosition { internal IntPtr Parent; internal int X, Y; }
         readonly Dictionary<IntPtr, OriginalPosition> positions = new Dictionary<IntPtr, OriginalPosition>();
         readonly HashSet<IntPtr> styled = new HashSet<IntPtr>();
+        sealed class Target { internal IntPtr Bar, List; internal bool Primary; }
+        readonly Stopwatch discoveryClock = Stopwatch.StartNew();
+        List<Target> targets = new List<Target>();
+        long lastDiscovery = -5000;
         internal string Status = "Waiting for the Windows taskbar...";
         internal int DisplayCount;
         internal int CenteredCount;
@@ -18,14 +23,19 @@ namespace TaskbarPlus
         {
             HadError = false;
             if (settings.Paused) { Restore(); Status = "Paused · Windows appearance restored"; return; }
-            var bars = Native.Taskbars();
-            DisplayCount = bars.Count; CenteredCount = 0;
+            if (discoveryClock.ElapsedMilliseconds - lastDiscovery >= 5000 || targets.Count == 0 ||
+                targets.Any(t => !Native.IsWindow(t.Bar) || (t.List != IntPtr.Zero && !Native.IsWindow(t.List))))
+            {
+                targets = Native.Taskbars().Select(bar => new Target { Bar = bar, List = Native.Descendant(bar, "MSTaskListWClass"), Primary = Native.Class(bar) == "Shell_TrayWnd" }).ToList();
+                lastDiscovery = discoveryClock.ElapsedMilliseconds;
+            }
+            DisplayCount = targets.Count; CenteredCount = 0;
             foreach (var stale in positions.Keys.Where(w => !Native.IsWindow(w)).ToArray()) positions.Remove(stale);
             styled.RemoveWhere(w => !Native.IsWindow(w));
-            foreach (var bar in bars)
+            foreach (var target in targets)
             {
-                bool selected = settings.AllDisplays || Native.Class(bar) == "Shell_TrayWnd";
-                IntPtr list = Native.Descendant(bar, "MSTaskListWClass");
+                IntPtr bar = target.Bar, list = target.List;
+                bool selected = settings.AllDisplays || target.Primary;
                 if (!selected) { RestoreBar(bar, list); continue; }
                 if (settings.Effect == "Default")
                 {
@@ -47,10 +57,10 @@ namespace TaskbarPlus
                 if (!settings.Center) { RestorePosition(list); continue; }
                 if (Center(bar, list, settings.Offset)) CenteredCount++;
             }
-            if (bars.Count == 0) Status = "Waiting for the Windows taskbar...";
+            if (targets.Count == 0) Status = "Waiting for the Windows taskbar...";
             else if (HadError) Status = "Windows could not apply one of the effects";
             else if (settings.Center && CenteredCount == 0) Status = "Appearance applied · waiting for app buttons";
-            else Status = "Active on " + (settings.AllDisplays ? bars.Count : 1) + " display" + ((settings.AllDisplays ? bars.Count : 1) == 1 ? "" : "s") + " · " + (settings.Center ? "Apps centered" : "Windows alignment");
+            else Status = "Active on " + (settings.AllDisplays ? targets.Count : 1) + " display" + ((settings.AllDisplays ? targets.Count : 1) == 1 ? "" : "s") + " · " + (settings.Center ? "Apps centered" : "Windows alignment");
         }
 
         // Center the real button bounds, not the oversized task-list window. Clamp

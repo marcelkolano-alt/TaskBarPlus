@@ -59,6 +59,8 @@
       </StackPanel>
     </ScrollViewer>
     <StackPanel Grid.Row="2" Margin="0,15,0,0">
+      <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center" Margin="0,0,12,0"><TextBlock x:Name="AppVersion" Text="TaskBar+" FontSize="12" FontWeight="SemiBold"/><TextBlock x:Name="UpdateStatus" Text="Check GitHub for updates when you need them." Foreground="{StaticResource Muted}" FontSize="11" Margin="0,3,0,0"/></StackPanel><Button x:Name="UpdateButton" Grid.Column="1" Content="Check for updates" Padding="10,7" FontSize="12" VerticalAlignment="Center"/></Grid>
+      <TextBlock x:Name="ResourceUsage" Text="CPU measuring  |  RAM measuring" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,0,0,7"/>
       <TextBlock x:Name="Status" Text="Connecting to your taskbar..." Foreground="#8EE8C4" FontSize="12" Margin="0,0,0,12"/>
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Button x:Name="PauseButton" Content="Pause"/><Button x:Name="ResetButton" Grid.Column="1" Content="Reset style" Margin="8,0,0,0"/><Button x:Name="HideButton" Grid.Column="3" Content="Keep in tray" Background="#6DDCB0" Foreground="#10231B" BorderBrush="#6DDCB0"/></Grid>
     </StackPanel>
