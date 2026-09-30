@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">TaskBar+ logo</title>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#191e27"/>
+  <g fill="#6ddcb0">
+    <rect x="52" y="96" width="48" height="48" rx="10"/>
+    <rect x="116" y="96" width="48" height="48" rx="10"/>
+    <rect x="44" y="168" width="168" height="16" rx="8"/>
+  </g>
+  <path d="M192 52v40M172 72h40" fill="none" stroke="#ecf0f6" stroke-width="12" stroke-linecap="round"/>
+</svg>
