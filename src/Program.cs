@@ -14,7 +14,7 @@ using Drawing = System.Drawing;
 
 [assembly: AssemblyTitle("TaskBar+")]
 [assembly: AssemblyDescription("Local taskbar transparency and centering for Windows 10")]
-[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyVersion("1.0.2.0")]
 
 namespace TaskbarPlus
 {

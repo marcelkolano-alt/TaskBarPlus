@@ -59,3 +59,5 @@ Native API references: [SetWindowPos](https://learn.microsoft.com/en-us/windows/
 ## Logo assets
 
 `assets/logo.svg` is the editable vector mark, `assets/logo.png` is the preview, and `assets/TaskBarPlus.ico` contains 16, 20, 24, 32, 40, 48, 64, 128, and 256px versions. Run `tools\build-icons.ps1` to regenerate the raster assets from the matching vector geometry in `tools/IconBuilder.cs`. The executable embeds the ICO as both a native Windows icon resource and a managed resource for the tray and settings window.
+
+The icon retains its charcoal tile, two mint squares, mint bar, and white plus. Each raster size fits the geometry to its own pixel grid, keeping the plus at least one pixel thick and the mint elements separate. The icon builder also writes a native-size review sheet to `build/icon-preview/icon-size-check.png`.
